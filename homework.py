@@ -1,12 +1,14 @@
 import logging
 import os
-import telegram
+import sys
 import time
-import requests
-import exceptions
-
-from dotenv import load_dotenv
 from logging.handlers import RotatingFileHandler
+
+import requests
+import telegram
+from dotenv import load_dotenv
+
+import exceptions
 
 load_dotenv()
 
@@ -34,32 +36,36 @@ def check_tokens():
 
 def send_message(bot, message):
     """Отправляет сообщение в Telegram чат."""
-    chat_id = TELEGRAM_CHAT_ID
-    text = message
+    logging.info('Начало отправки сообщения в telegram')
     try:
-        bot.send_message(chat_id, text)
-        logging.debug('Сообщение отправлено успешно')
+        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    except exceptions.TelegramError as error:
+        raise exceptions.TelegramError(
+            f'Не удалось отправить сообщение {error}')
     except Exception as error:
         logging.error(error)
+    else:
+        logging.debug('Сообщение отправлено успешно')
 
 
 def get_api_answer(timestamp):
     """Отправляем запрос к API и получаем список домашних работ."""
-    timestamp = {'from_date': 1676106000}
+    logging.info('Начат запрос к API')
+    act_timestamp = timestamp or int(time.time())
     params_request = {
         'url': ENDPOINT,
         'headers': HEADERS,
-        'params': {'from_date': timestamp},
+        'params': {'from_date': act_timestamp},
     }
     try:
         response = requests.get(**params_request)
         if response.status_code != 200:
             raise exceptions.EndPointIsNotAvailiable(response.status_code)
-        return response.json()
     except Exception as error:
         message = ('Неверный ответ API. Запрос: {url}, {headers}, {params}.'
                    ).format(**params_request)
         raise exceptions.WrongResponseCode(message, error)
+    return response.json()
 
 
 def check_response(response):
@@ -68,10 +74,10 @@ def check_response(response):
         raise TypeError('Переменная response не соответствует документации')
     if 'homeworks' not in response or 'current_date' not in response:
         raise exceptions.EmptyResponse('В ответе API нет ключа homeworks')
-    homeworks_list = response['homeworks']
-    if not isinstance(homeworks_list, list):
+    homeworks = response['homeworks']
+    if not isinstance(homeworks, list):
         raise TypeError('Homeworks не является списком')
-    return homeworks_list
+    return homeworks
 
 
 def parse_status(homework):
@@ -89,13 +95,12 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    timestamp = int(time.time())
-
     if not check_tokens():
         message = 'Не хватает нужного токена'
         logging.critical(message)
-        raise exceptions.TokenNotFoundException(message)
+        sys.exit('Отсутсвуют переменные окружения')
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    timestamp = int(time.time())
 
     while True:
         try:
@@ -106,9 +111,6 @@ def main():
             send_message(bot, message)
             timestamp = response.get('current_date')
 
-        except exceptions.MessageErrorException as error:
-            message = f'Не удалось отправить сообщение в Telegram - {error}'
-            logging.error(message)
         except exceptions.EndPointIsNotAvailiable as error:
             message = f'ENDPOINT недоступен. Код ответа API: {error}'
             logging.error(message)
@@ -126,13 +128,9 @@ if __name__ == '__main__':
         filename='main.log',
         filemode='w'
     )
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
     handler = RotatingFileHandler(
         'my_logger.log',
         maxBytes=50000000,
         backupCount=5
     )
-    logger.addHandler(handler)
-
     main()
