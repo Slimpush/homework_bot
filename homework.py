@@ -39,10 +39,7 @@ def send_message(bot, message):
     logging.info('Начало отправки сообщения в telegram')
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except exceptions.TelegramError as error:
-        raise exceptions.TelegramError(
-            f'Не удалось отправить сообщение {error}')
-    except Exception as error:
+    except telegram.error.TelegramError as error:
         logging.error(error)
     else:
         logging.debug('Сообщение отправлено успешно')
@@ -59,12 +56,12 @@ def get_api_answer(timestamp):
     }
     try:
         response = requests.get(**params_request)
-        if response.status_code != 200:
-            raise exceptions.EndPointIsNotAvailiable(response.status_code)
     except Exception as error:
         message = ('Неверный ответ API. Запрос: {url}, {headers}, {params}.'
                    ).format(**params_request)
         raise exceptions.WrongResponseCode(message, error)
+    if response.status_code != 200:
+        raise exceptions.EndPointIsNotAvailiable(response.status_code)
     return response.json()
 
 
@@ -73,7 +70,9 @@ def check_response(response):
     if not isinstance(response, dict):
         raise TypeError('Переменная response не соответствует документации')
     if 'homeworks' not in response or 'current_date' not in response:
-        raise exceptions.EmptyResponse('В ответе API нет ключа homeworks')
+        raise exceptions.EmptyResponse(
+            'В ответе API нет ключа homeworks или current_date'
+        )
     homeworks = response['homeworks']
     if not isinstance(homeworks, list):
         raise TypeError('Homeworks не является списком')
@@ -84,6 +83,8 @@ def parse_status(homework):
     """Извлекаем информацию о статусе конкретной домашней работы."""
     if 'homework_name' not in homework:
         raise KeyError('В ответе API отсутсвует ключ homework_name')
+    if 'status' not in homework:
+        raise KeyError('В ответе API отсутсвует ключ status')
     homework_name = homework['homework_name']
     homework_status = homework['status']
     if homework_status not in (HOMEWORK_VERDICTS):
@@ -101,22 +102,27 @@ def main():
         sys.exit('Отсутсвуют переменные окружения')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
+    last_error = ''
 
     while True:
         try:
             response = get_api_answer(timestamp)
-            homework_list = check_response(response)
-            homework = homework_list[0]
-            message = parse_status(homework)
-            send_message(bot, message)
             timestamp = response.get('current_date')
-
+            homeworks = check_response(response)
+            if homeworks:
+                message = parse_status(homeworks[0])
+            else:
+                message = 'Нет нового статуса работ'
+            send_message(bot, message)
         except exceptions.EndPointIsNotAvailiable as error:
             message = f'ENDPOINT недоступен. Код ответа API: {error}'
             logging.error(message)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logging.error(message)
+            if message != last_error:
+                last_error = message
+                send_message(bot, message)
         finally:
             time.sleep(RETRY_PERIOD)
 
