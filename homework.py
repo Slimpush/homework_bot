@@ -2,7 +2,6 @@ import logging
 import os
 import sys
 import time
-from logging.handlers import RotatingFileHandler
 
 import requests
 import telegram
@@ -40,7 +39,7 @@ def send_message(bot, message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except telegram.error.TelegramError as error:
-        logging.error(error)
+        logging.error(f'Не удалось отправить сообщение {error}')
     else:
         logging.debug('Сообщение отправлено успешно')
 
@@ -57,11 +56,13 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(**params_request)
     except Exception as error:
+        message = ('API недоступно. Запрос: {url}, {headers}, {params}.'
+                   ).format(**params_request)
+        raise exceptions.EndPointIsNotAvailiable(message, error)
+    if response.status_code != 200:
         message = ('Неверный ответ API. Запрос: {url}, {headers}, {params}.'
                    ).format(**params_request)
-        raise exceptions.WrongResponseCode(message, error)
-    if response.status_code != 200:
-        raise exceptions.EndPointIsNotAvailiable(response.status_code)
+        raise exceptions.WrongResponseCode(message, response.status_code)
     return response.json()
 
 
@@ -97,12 +98,12 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        message = 'Не хватает нужного токена'
+        message = 'Отсутсвуют переменные окружения'
         logging.critical(message)
-        sys.exit('Отсутсвуют переменные окружения')
+        sys.exit(message)
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    last_error = ''
+    last_message = ''
 
     while True:
         try:
@@ -112,16 +113,18 @@ def main():
             if homeworks:
                 message = parse_status(homeworks[0])
             else:
-                message = 'Нет нового статуса работ'
-            send_message(bot, message)
-        except exceptions.EndPointIsNotAvailiable as error:
-            message = f'ENDPOINT недоступен. Код ответа API: {error}'
-            logging.error(message)
+                message = f'За период от {timestamp} до настоящего момента '
+                'домашних работ нет'
+            if message != last_message:
+                send_message(bot, message)
+                last_message = message
+            else:
+                logging.info(message)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logging.error(message)
-            if message != last_error:
-                last_error = message
+            if message != last_message:
+                last_message = message
                 send_message(bot, message)
         finally:
             time.sleep(RETRY_PERIOD)
@@ -133,10 +136,5 @@ if __name__ == '__main__':
         level=logging.DEBUG,
         filename='main.log',
         filemode='w'
-    )
-    handler = RotatingFileHandler(
-        'my_logger.log',
-        maxBytes=50000000,
-        backupCount=5
     )
     main()

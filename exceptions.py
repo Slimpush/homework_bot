@@ -11,8 +11,3 @@ class WrongResponseCode(Exception):
 class EmptyResponse(Exception):
     """Пустой ответ API."""
     pass
-
-
-class TelegramError(Exception):
-    """Ошибка отправки сообщения в telegram."""
-    pass
