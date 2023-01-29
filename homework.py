@@ -119,6 +119,7 @@ def main():
                 send_message(bot, message)
                 last_message = message
             else:
+                message = 'Нет новоых статусов работ'
                 logging.info(message)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
